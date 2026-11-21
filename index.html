@@ -51,6 +51,12 @@ button{font:inherit; font-size:20px; color:var(--gold); background:transparent; 
 button:hover{background:var(--paper)}
 button:focus-visible{outline:2px solid var(--gold); outline-offset:3px}
 button.active{background:var(--gold); color:var(--bg); border-color:var(--gold)}
+.start,.again{width:auto; height:auto; border-radius:999px; font-family:inherit; font-style:normal; letter-spacing:.04em}
+.start{margin:1.6em auto 0; padding:.55em 1.7em; font-size:clamp(20px,3.6vw,24px); background:var(--gold); color:var(--bg); border-color:var(--gold); box-shadow:0 10px 24px -12px rgba(120,85,30,.6); animation:pulse 2.4s ease-in-out infinite}
+.start:hover{background:var(--gold); filter:brightness(1.06)}
+.again{margin:1.4em auto 0; padding:.4em 1.3em; font-size:17px}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+@media (prefers-reduced-motion: reduce){.start{animation:none}}
 .hint{font-size:clamp(16px,2.8vw,19px)!important; margin-top:1.4em!important}
 .count{font-size:18px; color:var(--muted); min-width:64px; text-align:center; font-variant-numeric:oldstyle-nums}
 @media (prefers-reduced-motion: reduce){.slide{transition:none}}
@@ -71,28 +77,51 @@ const MEDIA = [{"t": "i", "src": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQA
 const stage = document.getElementById('stage');
 const slides = [];
 function add(html){const d=document.createElement('section');d.className='slide';d.innerHTML=html;stage.appendChild(d);slides.push(d);}
-add('<div class="intro"><h1 class="script">Para Cris</h1><div class="rule"></div><p>Algunos de nuestros momentos, con admiración y mucho amor.</p><p class="hint">Toca &#9834; para escuchar la música</p></div>');
+add('<div class="intro"><h1 class="script">Para Cris</h1><div class="rule"></div><p>Algunos de nuestros momentos, con admiración y mucho amor.</p><button class="start" id="start">Comenzar &#9834;</button></div>');
 MEDIA.forEach((m,k)=>{
   if(m.t==='v') add('<figure class="photo" style="margin:0"><video src="'+m.src+'" muted playsinline preload="auto" aria-label="Video"></video></figure>');
   else add('<figure class="photo" style="margin:0"><img src="'+m.src+'" alt="Momento '+(k+1)+'"></figure>');
 });
-add('<div class="outro"><p>Gracias por cada momento compartido.</p><div class="rule"></div><p style="margin:0">Con amor,</p><div class="script">Kathe</div></div>');
+add('<div class="outro"><p>Gracias por cada momento compartido.</p><div class="rule"></div><p style="margin:0">Con amor,</p><div class="script">Kathe</div><button class="again" id="again">Ver de nuevo</button></div>');
 
-let i=0, playing=!window.matchMedia('(prefers-reduced-motion: reduce)').matches, timer=null;
+let i=0, playing=false, started=false, timer=null, fadeTimer=null;
+const LAST=slides.length-1, DUR=4500;
 const count=document.getElementById('count'), playBtn=document.getElementById('play');
-const DUR=4500;
+const prevBtn=document.getElementById('prev'), nextBtn=document.getElementById('next');
 function vid(s){return s.querySelector('video');}
+
+/* Música */
+const musicBtn=document.getElementById('music');
+const audio=new Audio(MUSIC); audio.loop=true; audio.preload='auto'; audio.volume=0.85;
+let musicOn=false, fadeInt=null;
+function setMusicUI(){ musicBtn.classList.toggle('active',musicOn); musicBtn.setAttribute('aria-pressed',musicOn); musicBtn.setAttribute('aria-label',musicOn?'Silenciar música':'Activar música'); }
+async function musicPlay(){ clearInterval(fadeInt); audio.volume=0.85; try{ await audio.play(); musicOn=true; }catch(err){ musicOn=false; } setMusicUI(); }
+function musicStop(){ clearInterval(fadeInt); audio.pause(); musicOn=false; setMusicUI(); }
+function musicFadeOut(secs){
+  clearInterval(fadeInt); if(!musicOn) return;
+  const step=audio.volume/(secs*10);
+  fadeInt=setInterval(()=>{ audio.volume=Math.max(0,audio.volume-step); if(audio.volume<=0.001){ musicStop(); audio.volume=0.85; } },100);
+}
+musicBtn.onclick=()=>{ if(musicOn) musicStop(); else { musicPlay(); if(!started) begin(); } };
+
+/* Presentación: avanza una sola vez y se detiene en la última página */
 function schedule(){
-  clearTimeout(timer); if(!playing) return;
+  clearTimeout(timer); if(!playing || i>=LAST) return;
   const v=vid(slides[i]);
   if(v){ v.onended=()=>{ if(playing) show(i+1); }; }
   else timer=setTimeout(()=>show(i+1),DUR);
 }
 function show(n){
+  n=Math.max(0,Math.min(LAST,n));
   const old=vid(slides[i]); if(old){old.pause(); old.onended=null;}
-  slides[i].classList.remove('on'); i=(n+slides.length)%slides.length; slides[i].classList.add('on');
-  count.textContent=(i+1)+' / '+slides.length;
+  slides[i].classList.remove('on'); i=n; slides[i].classList.add('on');
+  count.textContent=i+' / '+LAST;
+  count.style.visibility=i===0?'hidden':'visible';
+  prevBtn.disabled=i===0; nextBtn.disabled=i===LAST;
+  prevBtn.style.opacity=i===0?.35:1; nextBtn.style.opacity=i===LAST?.35:1;
   const v=vid(slides[i]); if(v){ v.muted=true; v.currentTime=0; v.loop=!playing; v.play().catch(()=>{}); }
+  clearTimeout(fadeTimer);
+  if(i===LAST){ setPlay(false); fadeTimer=setTimeout(()=>musicFadeOut(6),8000); }
   schedule();
 }
 function setPlay(p){
@@ -100,27 +129,20 @@ function setPlay(p){
   const v=vid(slides[i]); if(v) v.loop=!p;
   schedule();
 }
-function nav(d){show(i+d);}
-document.getElementById('prev').onclick=()=>nav(-1);
-document.getElementById('next').onclick=()=>nav(1);
-playBtn.onclick=()=>setPlay(!playing);
-document.addEventListener('keydown',e=>{if(e.key==='ArrowRight')nav(1);if(e.key==='ArrowLeft')nav(-1);if(e.key===' '){e.preventDefault();setPlay(!playing);}});
+function begin(){ started=true; if(!musicOn) musicPlay(); show(1); setPlay(true); }
+document.getElementById('start').onclick=begin;
+document.getElementById('again').onclick=()=>{ musicPlay(); show(1); setPlay(true); };
+function nav(d){ if(!started){ started=true; musicPlay(); } show(i+d); }
+prevBtn.onclick=()=>nav(-1);
+nextBtn.onclick=()=>nav(1);
+playBtn.onclick=()=>{ if(!started){ begin(); return; } if(i===LAST){ musicPlay(); show(1); setPlay(true); return; } setPlay(!playing); };
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight')nav(1);if(e.key==='ArrowLeft')nav(-1);if(e.key===' '){e.preventDefault();playBtn.click();}});
 let x0=null; stage.addEventListener('touchstart',e=>x0=e.touches[0].clientX,{passive:true});
 stage.addEventListener('touchend',e=>{if(x0===null)return; const dx=e.changedTouches[0].clientX-x0; if(Math.abs(dx)>40) nav(dx<0?1:-1); x0=null;});
 
-/* Música instrumental original incluida en la página (sin depender de internet) */
-const musicBtn=document.getElementById('music');
-const audio=new Audio(MUSIC); audio.loop=true; audio.preload='auto'; audio.volume=0.85;
-let musicOn=false;
-musicBtn.onclick=async()=>{
-  musicOn=!musicOn;
-  if(musicOn){ try{ await audio.play(); }catch(err){ musicOn=false; } }
-  else audio.pause();
-  musicBtn.classList.toggle('active',musicOn); musicBtn.setAttribute('aria-pressed',musicOn);
-  musicBtn.setAttribute('aria-label',musicOn?'Silenciar música':'Activar música');
-};
-
-show(0); setPlay(playing);
+show(0); setPlay(false);
+/* Si el navegador lo permite, la música arranca sola al abrir */
+audio.play().then(()=>{ musicOn=true; setMusicUI(); }).catch(()=>{});
 </script>
 </body>
 </html>
